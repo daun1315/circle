@@ -27,6 +27,7 @@ let connectMode = false;
 let connectSource = null;     // index of source circle while connecting
 let currentCircleIndex = null;
 let pendingLine = null;       // {from, to} awaiting confirmation in line modal
+let lastLineSettings = { color: "#ff3b3b", arrow: true, doubleArrow: false }; // 마지막으로 선택한 선 설정 기억
 
 /* ---------------- init circles array ---------------- */
 function ensureCircleCount(n) {
@@ -94,15 +95,19 @@ function renderLegendEditor(container, arr, onChange) {
   });
 }
 
-function renderLegendHeader(container, arr) {
+function renderLegendHeader(container, arr, style) {
   container.innerHTML = "";
   arr.forEach((item) => {
     if (!item.text.trim()) return;
     const entry = document.createElement("div");
     entry.className = "entry";
     const dot = document.createElement("span");
-    dot.className = "dot";
-    dot.style.background = item.color;
+    dot.className = "dot" + (style === "ring" ? " ring" : "");
+    if (style === "ring") {
+      dot.style.borderColor = item.color;
+    } else {
+      dot.style.background = item.color;
+    }
     const label = document.createElement("span");
     label.textContent = item.text;
     entry.append(dot, label);
@@ -113,14 +118,14 @@ function renderLegendHeader(container, arr) {
 function refreshLegends() {
   renderLegendEditor(lineLegendList, state.legend.line, onLegendChanged);
   renderLegendEditor(borderLegendList, state.legend.border, onLegendChanged);
-  renderLegendHeader(legendHeaderLine, state.legend.line);
-  renderLegendHeader(legendHeaderBorder, state.legend.border);
+  renderLegendHeader(legendHeaderLine, state.legend.line, "fill");
+  renderLegendHeader(legendHeaderBorder, state.legend.border, "ring");
   refreshLegendSelects();
 }
 
 function onLegendChanged() {
-  renderLegendHeader(legendHeaderLine, state.legend.line);
-  renderLegendHeader(legendHeaderBorder, state.legend.border);
+  renderLegendHeader(legendHeaderLine, state.legend.line, "fill");
+  renderLegendHeader(legendHeaderBorder, state.legend.border, "ring");
   refreshLegendSelects();
 }
 
@@ -170,11 +175,11 @@ countInput.oninput = () => applyCount(countInput.value || 2);
 
 /* ---------------- geometry ---------------- */
 function circleSizeFor(n) {
-  if (n <= 6) return 88;
-  if (n <= 10) return 76;
-  if (n <= 16) return 64;
-  if (n <= 22) return 54;
-  return 44;
+  if (n <= 6) return 104;
+  if (n <= 10) return 92;
+  if (n <= 16) return 78;
+  if (n <= 22) return 66;
+  return 54;
 }
 
 function positions(n) {
@@ -235,8 +240,17 @@ function renderCircles() {
   });
 }
 
-function colorToId(color) {
-  return "c" + color.replace("#", "");
+// 화살표는 <marker>/url(#..) 참조 대신 좌표를 직접 계산한 삼각형으로 그립니다.
+// (iframe, blob URL 등 일부 환경에서 url(#id) 프래그먼트 참조가 깨지는 문제를 피하기 위함)
+function arrowHeadPolygon(tipX, tipY, angleRad, size) {
+  const spread = Math.PI / 7.5;
+  const a1 = angleRad + Math.PI - spread;
+  const a2 = angleRad + Math.PI + spread;
+  const p1x = tipX + size * Math.cos(a1);
+  const p1y = tipY + size * Math.sin(a1);
+  const p2x = tipX + size * Math.cos(a2);
+  const p2y = tipY + size * Math.sin(a2);
+  return `${tipX},${tipY} ${p1x},${p1y} ${p2x},${p2y}`;
 }
 
 function renderLines() {
@@ -245,28 +259,39 @@ function renderLines() {
   const stageRect = circleStage.getBoundingClientRect();
   const w = stageRect.width || 1;
   const h = stageRect.height || 1;
+  const radius = circleSizeFor(n) / 2;
+  const arrowSize = 12;
 
-  // build defs with arrow markers for used colors
-  const usedColors = new Set(state.lines.map(l => l.color));
-  let defs = "<defs>";
-  usedColors.forEach(color => {
-    const id = colorToId(color);
-    defs += `<marker id="arrow-${id}" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-      <path d="M0,0 L10,5 L0,10 Z" fill="${color}"></path>
-    </marker>`;
-  });
-  defs += "</defs>";
-
-  let svgContent = defs;
+  let svgContent = "";
   state.lines.forEach(l => {
     if (l.from >= n || l.to >= n) return;
     const a = pts[l.from], b = pts[l.to];
-    const x1 = (a.x / 100) * w, y1 = (a.y / 100) * h;
-    const x2 = (b.x / 100) * w, y2 = (b.y / 100) * h;
-    const id = colorToId(l.color);
-    const markerEnd = l.arrow ? `marker-end="url(#arrow-${id})"` : "";
-    const markerStart = l.doubleArrow ? `marker-start="url(#arrow-${id})"` : "";
-    svgContent += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${l.color}" stroke-width="3" ${markerEnd} ${markerStart} stroke-linecap="round"></line>`;
+    let x1 = (a.x / 100) * w, y1 = (a.y / 100) * h;
+    let x2 = (b.x / 100) * w, y2 = (b.y / 100) * h;
+
+    const dx = x2 - x1, dy = y2 - y1;
+    const dist = Math.hypot(dx, dy) || 1;
+    const ux = dx / dist, uy = dy / dist;
+    const angle = Math.atan2(dy, dx);
+
+    // 원 테두리 바깥에서 선이 시작/끝나도록 반지름만큼 당겨줌
+    const startX = x1 + ux * radius, startY = y1 + uy * radius;
+    const endX = x2 - ux * radius, endY = y2 - uy * radius;
+
+    // 화살표가 있으면 선 끝을 화살표 길이만큼 더 당겨서 삼각형이 원에 파묻히지 않게 함
+    const lineEndX = l.arrow ? endX - ux * (arrowSize * 0.6) : endX;
+    const lineEndY = l.arrow ? endY - uy * (arrowSize * 0.6) : endY;
+    const lineStartX = l.doubleArrow ? startX + ux * (arrowSize * 0.6) : startX;
+    const lineStartY = l.doubleArrow ? startY + uy * (arrowSize * 0.6) : startY;
+
+    svgContent += `<line x1="${lineStartX}" y1="${lineStartY}" x2="${lineEndX}" y2="${lineEndY}" stroke="${l.color}" stroke-width="3.5" stroke-linecap="round"></line>`;
+
+    if (l.arrow) {
+      svgContent += `<polygon points="${arrowHeadPolygon(endX, endY, angle, arrowSize)}" fill="${l.color}"></polygon>`;
+    }
+    if (l.doubleArrow) {
+      svgContent += `<polygon points="${arrowHeadPolygon(startX, startY, angle + Math.PI, arrowSize)}" fill="${l.color}"></polygon>`;
+    }
   });
 
   lineSvg.setAttribute("viewBox", `0 0 ${w} ${h}`);
@@ -361,13 +386,23 @@ circleImgInput.onchange = (e) => {
   if (!file) return;
   const reader = new FileReader();
   reader.onload = (ev) => {
-    downscaleImage(ev.target.result, 400, (dataUrl) => {
-      state.circles[currentCircleIndex].image = dataUrl;
-      renderCircles();
+    downscaleImage(ev.target.result, 1000, (dataUrl) => {
+      openCropModal(dataUrl);
     });
   };
   reader.readAsDataURL(file);
   circleImgInput.value = "";
+};
+
+el("recropImgBtn").onclick = () => {
+  if (currentCircleIndex === null) return;
+  const c = state.circles[currentCircleIndex];
+  const src = c.rawImage || c.image;
+  if (!src) {
+    showToast("먼저 이미지를 업로드해 주세요.");
+    return;
+  }
+  openCropModal(src);
 };
 
 function downscaleImage(dataUrl, maxSize, cb) {
@@ -392,8 +427,87 @@ function downscaleImage(dataUrl, maxSize, cb) {
 el("removeImgBtn").onclick = () => {
   if (currentCircleIndex === null) return;
   state.circles[currentCircleIndex].image = null;
+  state.circles[currentCircleIndex].rawImage = null;
   renderCircles();
 };
+
+/* ---------------- image crop modal ---------------- */
+const cropModal = el("cropModal");
+const cropImage = el("cropImage");
+const cropZoom = el("cropZoom");
+let cropperInstance = null;
+let cropSourceDataUrl = null;
+
+function openCropModal(srcDataUrl) {
+  cropSourceDataUrl = srcDataUrl;
+  circleModal.classList.add("hidden");
+  cropModal.classList.remove("hidden");
+  cropZoom.value = 0;
+
+  if (cropperInstance) {
+    cropperInstance.destroy();
+    cropperInstance = null;
+  }
+
+  cropImage.src = srcDataUrl;
+  cropImage.onload = () => {
+    cropperInstance = new Cropper(cropImage, {
+      aspectRatio: 1,
+      viewMode: 1,
+      dragMode: "move",
+      background: false,
+      autoCropArea: 1,
+      cropBoxResizable: false,
+      cropBoxMovable: false,
+      toggleDragModeOnDblclick: false,
+      guides: false,
+      center: false,
+      highlight: false,
+    });
+  };
+}
+
+function closeCropModal() {
+  if (cropperInstance) {
+    cropperInstance.destroy();
+    cropperInstance = null;
+  }
+  cropModal.classList.add("hidden");
+  cropSourceDataUrl = null;
+  if (currentCircleIndex !== null) openCircleModal(currentCircleIndex);
+}
+
+cropZoom.oninput = () => {
+  if (!cropperInstance) return;
+  const ratio = 1 + (parseInt(cropZoom.value, 10) / 100) * 2.5; // 1x ~ 3.5x
+  cropperInstance.zoomTo(ratio);
+};
+
+el("cropRotateLeft").onclick = () => cropperInstance && cropperInstance.rotate(-90);
+el("cropRotateRight").onclick = () => cropperInstance && cropperInstance.rotate(90);
+el("cropResetBtn").onclick = () => {
+  if (!cropperInstance) return;
+  cropperInstance.reset();
+  cropZoom.value = 0;
+};
+
+el("confirmCropBtn").onclick = () => {
+  if (!cropperInstance || currentCircleIndex === null) { closeCropModal(); return; }
+  const canvas = cropperInstance.getCroppedCanvas({
+    width: 450,
+    height: 450,
+    imageSmoothingQuality: "high",
+  });
+  if (canvas) {
+    const finalDataUrl = canvas.toDataURL("image/png");
+    state.circles[currentCircleIndex].image = finalDataUrl;
+    state.circles[currentCircleIndex].rawImage = cropSourceDataUrl;
+    renderCircles();
+  }
+  closeCropModal();
+};
+
+el("cancelCropBtn").onclick = () => closeCropModal();
 
 borderEnabled.onchange = () => {
   state.circles[currentCircleIndex].border.enabled = borderEnabled.checked;
@@ -441,10 +555,12 @@ const arrowEnabled = el("arrowEnabled");
 const doubleArrowEnabled = el("doubleArrowEnabled");
 
 function openLineModal() {
-  lineColorPicker.value = state.legend.line[0] ? state.legend.line[0].color : "#ff3b3b";
-  lineLegendSelect.value = "";
-  arrowEnabled.checked = true;
-  doubleArrowEnabled.checked = false;
+  // 지난번에 고른 색/화살표 설정을 그대로 유지
+  lineColorPicker.value = lastLineSettings.color;
+  const matched = state.legend.line.find(it => it.color.toLowerCase() === lastLineSettings.color.toLowerCase());
+  lineLegendSelect.value = matched ? matched.color : "";
+  arrowEnabled.checked = lastLineSettings.arrow;
+  doubleArrowEnabled.checked = lastLineSettings.doubleArrow;
   lineModal.classList.remove("hidden");
 }
 
@@ -454,13 +570,18 @@ lineLegendSelect.onchange = () => {
 
 el("confirmLineBtn").onclick = () => {
   if (!pendingLine) return;
+  lastLineSettings = {
+    color: lineColorPicker.value,
+    arrow: arrowEnabled.checked,
+    doubleArrow: doubleArrowEnabled.checked,
+  };
   state.lines.push({
     id: lineIdSeq++,
     from: pendingLine.from,
     to: pendingLine.to,
-    color: lineColorPicker.value,
-    arrow: arrowEnabled.checked,
-    doubleArrow: doubleArrowEnabled.checked,
+    color: lastLineSettings.color,
+    arrow: lastLineSettings.arrow,
+    doubleArrow: lastLineSettings.doubleArrow,
   });
   pendingLine = null;
   lineModal.classList.add("hidden");

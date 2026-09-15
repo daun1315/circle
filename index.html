@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>원형 관계도 메이커</title>
+<link rel="stylesheet" href="assets/cropper.min.css">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -91,6 +92,7 @@
     <div class="modal-row">
       <button class="btn" id="uploadImgBtn">🖼️ 이미지 업로드</button>
       <input type="file" id="circleImgInput" accept="image/*" hidden>
+      <button class="btn" id="recropImgBtn">✂️ 다시 자르기</button>
       <button class="btn danger" id="removeImgBtn">이미지 제거</button>
     </div>
     <div class="modal-row">
@@ -139,9 +141,33 @@
   </div>
 </div>
 
+<!-- 이미지 크롭 모달 -->
+<div id="cropModal" class="modal-overlay hidden">
+  <div class="modal crop-modal">
+    <h3>이미지 자르기</h3>
+    <div class="crop-container">
+      <img id="cropImage" src="" alt="crop target">
+    </div>
+    <div class="modal-row">
+      <label>확대/축소</label>
+      <input type="range" id="cropZoom" min="0" max="100" value="0">
+    </div>
+    <div class="modal-row">
+      <button class="btn small" id="cropRotateLeft">↺ 회전</button>
+      <button class="btn small" id="cropRotateRight">↻ 회전</button>
+      <button class="btn small" id="cropResetBtn">초기화</button>
+    </div>
+    <div class="modal-actions">
+      <button class="btn primary" id="confirmCropBtn">적용</button>
+      <button class="btn" id="cancelCropBtn">취소</button>
+    </div>
+  </div>
+</div>
+
 <div id="toast" class="toast hidden"></div>
 
 <script src="assets/html2canvas.min.js"></script>
+<script src="assets/cropper.min.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
