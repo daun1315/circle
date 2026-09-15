@@ -127,6 +127,7 @@ function onLegendChanged() {
   renderLegendHeader(legendHeaderLine, state.legend.line, "fill");
   renderLegendHeader(legendHeaderBorder, state.legend.border, "ring");
   refreshLegendSelects();
+  scheduleAutosave();
 }
 
 function refreshLegendSelects() {
@@ -222,7 +223,7 @@ function renderCircles() {
     disc.style.setProperty("--circle-size", size + "px");
     if (c.image) disc.style.backgroundImage = `url(${c.image})`;
     if (c.border && c.border.enabled) {
-      disc.style.border = `6px solid ${c.border.color}`;
+      disc.style.border = `3px solid ${c.border.color}`;
     } else {
       disc.style.border = "0px solid transparent";
     }
@@ -325,6 +326,7 @@ function renderAll() {
   renderCircles();
   renderLines();
   renderLineList();
+  scheduleAutosave();
 }
 
 window.addEventListener("resize", () => renderLines());
@@ -429,6 +431,7 @@ el("removeImgBtn").onclick = () => {
   state.circles[currentCircleIndex].image = null;
   state.circles[currentCircleIndex].rawImage = null;
   renderCircles();
+  scheduleAutosave();
 };
 
 /* ---------------- image crop modal ---------------- */
@@ -503,6 +506,7 @@ el("confirmCropBtn").onclick = () => {
     state.circles[currentCircleIndex].image = finalDataUrl;
     state.circles[currentCircleIndex].rawImage = cropSourceDataUrl;
     renderCircles();
+    scheduleAutosave();
   }
   closeCropModal();
 };
@@ -512,12 +516,14 @@ el("cancelCropBtn").onclick = () => closeCropModal();
 borderEnabled.onchange = () => {
   state.circles[currentCircleIndex].border.enabled = borderEnabled.checked;
   renderCircles();
+  scheduleAutosave();
 };
 borderColorPicker.oninput = () => {
   state.circles[currentCircleIndex].border.color = borderColorPicker.value;
   borderEnabled.checked = true;
   state.circles[currentCircleIndex].border.enabled = true;
   renderCircles();
+  scheduleAutosave();
 };
 borderLegendSelect.onchange = () => {
   if (!borderLegendSelect.value) return;
@@ -526,10 +532,12 @@ borderLegendSelect.onchange = () => {
   state.circles[currentCircleIndex].border.enabled = true;
   borderEnabled.checked = true;
   renderCircles();
+  scheduleAutosave();
 };
 circleLabelInput.oninput = () => {
   state.circles[currentCircleIndex].label = circleLabelInput.value;
   renderCircles();
+  scheduleAutosave();
 };
 
 el("startConnectFromModal").onclick = () => {
@@ -595,12 +603,12 @@ el("cancelLineBtn").onclick = () => {
 
 /* ---------------- title / watermark binding ---------------- */
 titleBadge.textContent = state.title;
-titleBadge.oninput = () => { state.title = titleBadge.textContent; };
-watermarkInput.oninput = () => { state.watermark = watermarkInput.value; };
+titleBadge.oninput = () => { state.title = titleBadge.textContent; scheduleAutosave(); };
+watermarkInput.oninput = () => { state.watermark = watermarkInput.value; scheduleAutosave(); };
 
 /* ---------------- JSON save / load ---------------- */
-el("saveJsonBtn").onclick = () => {
-  const data = {
+function serializeState() {
+  return {
     version: 1,
     count: state.count,
     title: state.title,
@@ -609,6 +617,29 @@ el("saveJsonBtn").onclick = () => {
     lines: state.lines,
     legend: state.legend,
   };
+}
+
+function applyLoadedData(data) {
+  state.count = Math.max(2, Math.min(30, data.count || 12));
+  state.title = data.title || "관계도 제목";
+  state.circles = Array.isArray(data.circles) ? data.circles : [];
+  state.lines = Array.isArray(data.lines) ? data.lines : [];
+  lineIdSeq = state.lines.reduce((m, l) => Math.max(m, l.id || 0), 0) + 1;
+  state.legend.line = (data.legend && data.legend.line) ? data.legend.line : JSON.parse(JSON.stringify(DEFAULT_LINE_LEGEND));
+  state.legend.border = (data.legend && data.legend.border) ? data.legend.border : [];
+  ensureCircleCount(state.count);
+
+  countSlider.value = state.count;
+  countInput.value = state.count;
+  titleBadge.textContent = state.title;
+  watermarkInput.value = data.watermark || "";
+
+  refreshLegends();
+  renderAll();
+}
+
+el("saveJsonBtn").onclick = () => {
+  const data = serializeState();
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -628,22 +659,8 @@ el("loadJsonInput").onchange = (e) => {
   reader.onload = (ev) => {
     try {
       const data = JSON.parse(ev.target.result);
-      state.count = Math.max(2, Math.min(30, data.count || 12));
-      state.title = data.title || "관계도 제목";
-      state.circles = Array.isArray(data.circles) ? data.circles : [];
-      state.lines = Array.isArray(data.lines) ? data.lines : [];
-      lineIdSeq = state.lines.reduce((m, l) => Math.max(m, l.id || 0), 0) + 1;
-      state.legend.line = (data.legend && data.legend.line) ? data.legend.line : JSON.parse(JSON.stringify(DEFAULT_LINE_LEGEND));
-      state.legend.border = (data.legend && data.legend.border) ? data.legend.border : [];
-      ensureCircleCount(state.count);
-
-      countSlider.value = state.count;
-      countInput.value = state.count;
-      titleBadge.textContent = state.title;
-      watermarkInput.value = data.watermark || "";
-
-      refreshLegends();
-      renderAll();
+      applyLoadedData(data);
+      scheduleAutosave(true);
       showToast("JSON 파일을 불러왔어요.");
     } catch (err) {
       showToast("JSON 파일을 읽지 못했어요.");
@@ -653,6 +670,62 @@ el("loadJsonInput").onchange = (e) => {
   reader.readAsText(file);
   e.target.value = "";
 };
+
+/* ---------------- 브라우저 자동 저장 (localStorage) ---------------- */
+const AUTOSAVE_KEY = "circle-diagram-autosave-v1";
+const autosaveHint = el("autosaveHint");
+let autosaveTimer = null;
+let autosaveWarned = false;
+
+function scheduleAutosave(immediate) {
+  clearTimeout(autosaveTimer);
+  const run = () => {
+    try {
+      const data = serializeState();
+      localStorage.setItem(AUTOSAVE_KEY, JSON.stringify(data));
+      autosaveHint.textContent = "이 브라우저에 자동 저장됐어요 (" + new Date().toLocaleTimeString("ko-KR") + ")";
+      autosaveWarned = false;
+    } catch (err) {
+      console.error("autosave failed", err);
+      if (!autosaveWarned) {
+        autosaveWarned = true;
+        showToast("이미지 용량이 커서 자동 저장에 실패했어요. JSON 저장을 이용해 주세요.");
+        autosaveHint.textContent = "자동 저장 실패 - 용량 초과. JSON으로 저장해 두세요.";
+      }
+    }
+  };
+  if (immediate) run();
+  else autosaveTimer = setTimeout(run, 500);
+}
+
+function tryRestoreAutosave() {
+  let raw;
+  try {
+    raw = localStorage.getItem(AUTOSAVE_KEY);
+  } catch (err) {
+    return false;
+  }
+  if (!raw) return false;
+  try {
+    const data = JSON.parse(raw);
+    applyLoadedData(data);
+    autosaveHint.textContent = "이전에 작업하던 내용을 불러왔어요.";
+    return true;
+  } catch (err) {
+    console.error("autosave restore failed", err);
+    return false;
+  }
+}
+
+el("clearAutosaveBtn").onclick = () => {
+  try {
+    localStorage.removeItem(AUTOSAVE_KEY);
+  } catch (err) { /* ignore */ }
+  autosaveHint.textContent = "자동 저장 내용을 지웠어요. 지금부터 새로 저장돼요.";
+  showToast("자동 저장 내용을 지웠어요.");
+};
+
+
 
 /* ---------------- PNG export ---------------- */
 el("exportPngBtn").onclick = async () => {
@@ -700,6 +773,9 @@ el("exportPngBtn").onclick = async () => {
 });
 
 /* ---------------- init ---------------- */
-ensureCircleCount(state.count);
-refreshLegends();
-renderAll();
+const restored = tryRestoreAutosave();
+if (!restored) {
+  ensureCircleCount(state.count);
+  refreshLegends();
+  renderAll();
+}
