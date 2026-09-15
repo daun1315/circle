@@ -223,7 +223,7 @@ function renderCircles() {
     disc.style.setProperty("--circle-size", size + "px");
     if (c.image) disc.style.backgroundImage = `url(${c.image})`;
     if (c.border && c.border.enabled) {
-      disc.style.border = `3px solid ${c.border.color}`;
+      disc.style.border = `6px solid ${c.border.color}`;
     } else {
       disc.style.border = "0px solid transparent";
     }
