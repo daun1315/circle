@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>원형 관계도 메이커</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="app">
+
+  <!-- 좌측 컨트롤 패널 -->
+  <aside class="panel">
+    <h1>원형 관계도 메이커</h1>
+
+    <section class="block">
+      <h2>1. 원 개수</h2>
+      <div class="row">
+        <input type="range" id="countSlider" min="2" max="30" value="12">
+        <input type="number" id="countInput" min="2" max="30" value="12">
+      </div>
+      <p class="hint">2 ~ 30개 사이에서 조절할 수 있어요.</p>
+    </section>
+
+    <section class="block">
+      <h2>2. 선 색상 의미 (범례)</h2>
+      <div id="lineLegendList" class="legend-list"></div>
+      <button class="btn small" id="addLineLegend">+ 항목 추가</button>
+    </section>
+
+    <section class="block">
+      <h2>3. 테두리 색상 의미 (범례)</h2>
+      <div id="borderLegendList" class="legend-list"></div>
+      <button class="btn small" id="addBorderLegend">+ 항목 추가</button>
+    </section>
+
+    <section class="block">
+      <h2>4. 선 연결 모드</h2>
+      <button class="btn" id="connectModeBtn">🔗 선 연결 모드 켜기</button>
+      <p class="hint" id="connectHint">원을 두 개 순서대로 클릭하면 선이 만들어져요.</p>
+      <div id="lineList" class="item-list"></div>
+    </section>
+
+    <section class="block">
+      <h2>5. 저장 / 불러오기</h2>
+      <div class="row wrap">
+        <button class="btn" id="saveJsonBtn">💾 JSON 저장</button>
+        <button class="btn" id="loadJsonBtn">📂 JSON 불러오기</button>
+        <input type="file" id="loadJsonInput" accept="application/json" hidden>
+      </div>
+      <div class="row wrap">
+        <button class="btn primary" id="exportPngBtn">🖼️ 고화질 PNG로 저장</button>
+      </div>
+      <div class="row">
+        <label class="hint" for="pngScale">해상도 배율</label>
+        <select id="pngScale">
+          <option value="2">2x</option>
+          <option value="3" selected>3x</option>
+          <option value="4">4x</option>
+        </select>
+      </div>
+    </section>
+  </aside>
+
+  <!-- 우측 캔버스 영역 -->
+  <main class="stage-wrap">
+    <div id="captureArea" class="capture-area">
+      <div class="legend-header" id="legendHeader">
+        <div class="legend-col" id="legendHeaderLine"></div>
+        <div class="legend-col" id="legendHeaderBorder"></div>
+      </div>
+
+      <div class="title-badge" id="titleBadge" contenteditable="true" spellcheck="false">관계도 제목</div>
+
+      <div id="circleStage" class="circle-stage">
+        <svg id="lineSvg" class="line-svg"></svg>
+        <div id="circleLayer" class="circle-layer"></div>
+      </div>
+
+      <input type="text" id="watermarkInput" class="watermark-input" placeholder="@내_아이디 (선택)">
+    </div>
+  </main>
+
+</div>
+
+<!-- 원 편집 모달 -->
+<div id="circleModal" class="modal-overlay hidden">
+  <div class="modal">
+    <h3>원 편집</h3>
+    <div class="modal-row">
+      <button class="btn" id="uploadImgBtn">🖼️ 이미지 업로드</button>
+      <input type="file" id="circleImgInput" accept="image/*" hidden>
+      <button class="btn danger" id="removeImgBtn">이미지 제거</button>
+    </div>
+    <div class="modal-row">
+      <label class="check-label">
+        <input type="checkbox" id="borderEnabled"> 테두리 사용
+      </label>
+      <input type="color" id="borderColorPicker" value="#ff3b3b">
+      <select id="borderLegendSelect"><option value="">직접 색상 선택</option></select>
+    </div>
+    <div class="modal-row">
+      <label>이름표(선택)</label>
+      <input type="text" id="circleLabelInput" placeholder="원 아래 표시될 이름">
+    </div>
+    <div class="modal-row">
+      <button class="btn" id="startConnectFromModal">🔗 이 원에서 선 연결 시작</button>
+    </div>
+    <div class="modal-actions">
+      <button class="btn" id="closeModalBtn">닫기</button>
+    </div>
+  </div>
+</div>
+
+<!-- 선 편집 모달 -->
+<div id="lineModal" class="modal-overlay hidden">
+  <div class="modal">
+    <h3>선 설정</h3>
+    <div class="modal-row">
+      <label>색상</label>
+      <input type="color" id="lineColorPicker" value="#ff3b3b">
+      <select id="lineLegendSelect"><option value="">직접 색상 선택</option></select>
+    </div>
+    <div class="modal-row">
+      <label class="check-label">
+        <input type="checkbox" id="arrowEnabled"> 끝에 화살표 추가
+      </label>
+    </div>
+    <div class="modal-row">
+      <label class="check-label">
+        <input type="checkbox" id="doubleArrowEnabled"> 양방향 화살표
+      </label>
+    </div>
+    <div class="modal-actions">
+      <button class="btn" id="confirmLineBtn">추가</button>
+      <button class="btn" id="cancelLineBtn">취소</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast" class="toast hidden"></div>
+
+<script src="assets/html2canvas.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
